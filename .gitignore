@@ -218,3 +218,43 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ==============================================================================
+# PlatformIO & Embedded Firmware
+# ==============================================================================
+.pio/
+.pioenvs/
+.piolibdeps/
+.clang_complete
+.gcc-flags.json
+
+# Binary & build outputs
+*.bin
+*.elf
+*.hex
+*.a
+*.o
+
+# ==============================================================================
+# SECURITY: Secrets, Tokens, and Device Credentials (DO NOT COMMIT)
+# ==============================================================================
+*config.h
+!*config.example.h
+*secrets.h
+!*secrets.example.h
+*config.local.h
+secrets.ini
+secrets.yaml
+*.local.ini
+.env
+.env.*
+*.pem
+*.key
+*.cert
+*.crt
+bambu_credentials.json
+
+# IDEs
+.vscode/
+.idea/
+.esphome/
