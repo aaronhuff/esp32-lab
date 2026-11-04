@@ -9,11 +9,14 @@ esphome:
     priority: -100
     then:
       - light.turn_on:
+          id: display_backlight
+          brightness: 55%
+      - light.turn_on:
           id: status_led
-          red: 90%
-          green: 35%
+          red: 100%
+          green: 18%
           blue: 0%
-          brightness: 35%
+          brightness: 22%
 
 esp32:
   board: esp32-c6-devkitc-1
@@ -27,11 +30,35 @@ wifi:
   fast_connect: true
   id: wifi_component
 
-# Sync real-world time for display clock
+# Sync real-world time & manage Night Mode schedule (11 PM - 7 AM)
 time:
   - platform: sntp
     id: sntp_time
     timezone: "America/Toronto"
+    on_time:
+      # 11:00 PM (23:00): Night Mode Sleep (Screen & LED off)
+      - seconds: 0
+        minutes: 0
+        hours: 23
+        then:
+          - light.turn_off: display_backlight
+          - light.turn_off: status_led
+          - logger.log: "Entering Night Mode (Sleep)"
+      # 7:00 AM (07:00): Morning Wake Up
+      - seconds: 0
+        minutes: 0
+        hours: 7
+        then:
+          - light.turn_on:
+              id: display_backlight
+              brightness: 55%
+          - light.turn_on:
+              id: status_led
+              brightness: 22%
+              red: 100%
+              green: 18%
+              blue: 0%
+          - logger.log: "Exiting Night Mode (Wake)"
 
 logger:
   level: INFO
@@ -49,8 +76,22 @@ sensor:
     id: wifi_signal_dbm
     name: "WiFi Signal"
 
-# RGB LED on GPIO 8 - Solid Bitcoin Orange (No rainbow)
+# PWM Output for Display Backlight (Dimmable on GPIO 22)
+output:
+  - platform: ledc
+    pin: GPIO22
+    id: backlight_pwm
+    frequency: 1000Hz
+
+# Backlight Monochromatic Light Component (55% Daytime Brightness)
 light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Display Backlight"
+    id: display_backlight
+    restore_mode: ALWAYS_ON
+
+  # Addressable WS2812 RGB LED on GPIO 8
   - platform: esp32_rmt_led_strip
     pin: GPIO8
     num_leds: 1
@@ -159,15 +200,17 @@ interval:
                                   id(btc_24h_change) = change;
                                   id(btc_updated_str) = id(sntp_time).now().strftime("%H:%M:%S");
 
-                                  // Update onboard RGB LED: Bitcoin Orange (or Red if 24h trend is down)
-                                  auto call = id(status_led).turn_on();
-                                  call.set_brightness(0.35); // Gentle desk glow, not blinding
-                                  if (change >= 0) {
-                                    call.set_rgb(0.9, 0.35, 0.0); // Signature Bitcoin Orange
-                                  } else {
-                                    call.set_rgb(0.85, 0.05, 0.0); // Red when market is down
+                                  // Only update LED if not in Night Mode (backlight is on)
+                                  if (id(display_backlight).current_values.is_on()) {
+                                    auto call = id(status_led).turn_on();
+                                    call.set_brightness(0.22); // Calm, gentle desk glow
+                                    if (change >= 0) {
+                                      call.set_rgb(1.0, 0.18, 0.0); // Rich Bitcoin Amber-Orange
+                                    } else {
+                                      call.set_rgb(1.0, 0.0, 0.0);  // Pure Red when market is down
+                                    }
+                                    call.perform();
                                   }
-                                  call.perform();
                                   return true;
                                 }
                                 return false;
@@ -177,7 +220,7 @@ interval:
                               format: "HTTP request failed with status %d"
                               args: ['response->status_code']
 
-# Physical BOOT button on GPIO 9 toggles pages on click
+# Physical BOOT button on GPIO 9 (Click: Wake screen if sleeping, or Next Page if awake)
 binary_sensor:
   - platform: gpio
     pin:
@@ -190,7 +233,17 @@ binary_sensor:
     on_click:
       then:
         - lambda: |-
-            id(disp).show_next_page();
+            if (!id(display_backlight).current_values.is_on()) {
+              // Wake up screen and LED
+              auto bl_call = id(display_backlight).turn_on();
+              bl_call.set_brightness(0.55);
+              bl_call.perform();
+              auto led_call = id(status_led).turn_on();
+              led_call.perform();
+            } else {
+              // Cycle to next page
+              id(disp).show_next_page();
+            }
 
 # Waveshare 1.47" ST7789 Display (172x320 landscape: 320x172)
 display:
@@ -200,14 +253,13 @@ display:
     cs_pin: GPIO14
     dc_pin: GPIO15
     reset_pin: GPIO21
-    backlight_pin: GPIO22
     rotation: 90
     pages:
       # Page 1: BTC Ticker
       - id: page_btc
         lambda: |-
           // Header
-          it.print(10, 8, id(font_medium), id(color_orange), "BTC / USD");
+          it.print(10, 8, id(font_medium), id(color_orange), "BITCOIN");
           if (id(sntp_time).now().is_valid()) {
             it.strftime(310, 8, id(font_medium), id(color_light_gray), TextAlign::TOP_RIGHT, "%H:%M", id(sntp_time).now());
           }
@@ -244,7 +296,7 @@ display:
           it.line(10, 142, 310, 142, id(color_gray));
 
           // Footer
-          it.print(10, 148, id(font_small), id(color_light_gray), "BTC POC");
+          it.print(10, 148, id(font_small), id(color_light_gray), "BTC / USD");
           it.print(310, 148, id(font_small), id(color_gray), TextAlign::TOP_RIGHT, "[BTN: Next Page]");
 
       # Page 2: System & Network Info
@@ -256,7 +308,7 @@ display:
 
           // Info rows
           it.print(10, 42, id(font_small), id(color_light_gray), "Board: Waveshare ESP32-C6 1.47\"");
-          
+
           char ip_str[48];
           if (id(wifi_ip).has_state() && !id(wifi_ip).state.empty()) {
             snprintf(ip_str, sizeof(ip_str), "IP: %s", id(wifi_ip).state.c_str());
