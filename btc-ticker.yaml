@@ -96,7 +96,7 @@ light:
     pin: GPIO8
     num_leds: 1
     chipset: WS2812
-    rgb_order: GRB
+    rgb_order: RGB
     name: "Onboard RGB"
     id: status_led
     default_transition_length: 500ms
